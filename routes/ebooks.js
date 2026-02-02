@@ -2,9 +2,7 @@ import express from 'express';
 import Ebook from '../models/Ebook.js';
 import User from '../models/User.js';
 import { protect, admin } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
-import fs from 'fs';
-import path from 'path';
+import { upload, processUploads } from '../middleware/cloudinaryUpload.js';
 
 const router = express.Router();
 
@@ -73,25 +71,22 @@ router.get('/:id', async (req, res) => {
 router.post('/', protect, admin, upload.fields([
   { name: 'pdfFile', maxCount: 1 },
   { name: 'coverImage', maxCount: 1 }
-]), async (req, res) => {
+]), processUploads, async (req, res) => {
   try {
-    const { title, description, author, category, tags } = req.body;
+    const { title, description, author, category, tags, pdfFile, coverImage } = req.body;
 
-    if (!req.files.pdfFile || !req.files.coverImage) {
+    if (!pdfFile || !coverImage) {
       return res.status(400).json({ message: 'PDF e imagem de capa são obrigatórios' });
     }
-
-    const pdfFile = req.files.pdfFile[0];
-    const coverImage = req.files.coverImage[0];
 
     const ebook = await Ebook.create({
       title,
       description,
       author,
       category,
-      coverImage: `/uploads/images/${coverImage.filename}`,
-      pdfFile: `/uploads/pdfs/${pdfFile.filename}`,
-      fileSize: pdfFile.size,
+      coverImage,
+      pdfFile,
+      fileSize: req.files.pdfFile[0].size,
       tags: tags ? JSON.parse(tags) : [],
       uploadedBy: req.user._id
     });
@@ -112,7 +107,7 @@ router.post('/', protect, admin, upload.fields([
 router.put('/:id', protect, admin, upload.fields([
   { name: 'pdfFile', maxCount: 1 },
   { name: 'coverImage', maxCount: 1 }
-]), async (req, res) => {
+]), processUploads, async (req, res) => {
   try {
     const ebook = await Ebook.findById(req.params.id);
     
@@ -120,7 +115,7 @@ router.put('/:id', protect, admin, upload.fields([
       return res.status(404).json({ message: 'Ebook não encontrado' });
     }
 
-    const { title, description, author, category, tags, featured } = req.body;
+    const { title, description, author, category, tags, featured, coverImage, pdfFile } = req.body;
 
     // Atualizar campos
     if (title) ebook.title = title;
@@ -130,24 +125,14 @@ router.put('/:id', protect, admin, upload.fields([
     if (tags) ebook.tags = JSON.parse(tags);
     if (featured !== undefined) ebook.featured = featured;
 
-    // Atualizar arquivos se fornecidos
-    if (req.files) {
-      if (req.files.coverImage) {
-        // Deletar imagem antiga
-        const oldImagePath = path.join(process.cwd(), ebook.coverImage);
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
-        ebook.coverImage = `/uploads/images/${req.files.coverImage[0].filename}`;
-      }
+    // Atualizar arquivos se fornecidos (já processados pelo Cloudinary)
+    if (coverImage) {
+      ebook.coverImage = coverImage;
+    }
 
+    if (pdfFile) {
+      ebook.pdfFile = pdfFile;
       if (req.files.pdfFile) {
-        // Deletar PDF antigo
-        const oldPdfPath = path.join(process.cwd(), ebook.pdfFile);
-        if (fs.existsSync(oldPdfPath)) {
-          fs.unlinkSync(oldPdfPath);
-        }
-        ebook.pdfFile = `/uploads/pdfs/${req.files.pdfFile[0].filename}`;
         ebook.fileSize = req.files.pdfFile[0].size;
       }
     }

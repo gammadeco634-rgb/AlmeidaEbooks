@@ -1,34 +1,34 @@
 import multer from 'multer';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import dotenv from 'dotenv';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+dotenv.config();
 
-// Criar diretórios se não existirem
-const uploadsDir = path.join(__dirname, '../uploads');
-const pdfsDir = path.join(uploadsDir, 'pdfs');
-const imagesDir = path.join(uploadsDir, 'images');
+// Configurar Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'your_cloud_name',
+  api_key: process.env.CLOUDINARY_API_KEY || 'your_api_key',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'your_api_secret'
+});
 
-[uploadsDir, pdfsDir, imagesDir].forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+// Configuração de armazenamento para PDFs
+const pdfStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'ebooks/pdfs',
+    allowed_formats: ['pdf'],
+    resource_type: 'raw'
   }
 });
 
-// Configuração de armazenamento
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
-      cb(null, pdfsDir);
-    } else {
-      cb(null, imagesDir);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+// Configuração de armazenamento para imagens
+const imageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'ebooks/images',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    transformation: [{ width: 500, height: 700, crop: 'limit' }]
   }
 });
 
@@ -51,10 +51,30 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-export const upload = multer({
-  storage,
+// Criar diferentes uploaders para PDFs e imagens
+export const uploadPdf = multer({
+  storage: pdfStorage,
   fileFilter,
   limits: {
     fileSize: 50 * 1024 * 1024 // 50MB
   }
 });
+
+export const uploadImage = multer({
+  storage: imageStorage,
+  fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB
+  }
+});
+
+// Upload misto (PDF + imagem)
+export const upload = multer({
+  storage: multer.memoryStorage(), // Temporário, decidiremos no controller
+  fileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024
+  }
+});
+
+export { cloudinary };
