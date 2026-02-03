@@ -84,6 +84,14 @@ app.get('/files/:filename', async (req, res) => {
   }
 });
 
+// Rota de compatibilidade para URLs antigas (uploads locais)
+app.get('/uploads/:type/:filename', (req, res) => {
+  res.status(404).json({ 
+    message: 'Arquivo não encontrado. Este ebook foi criado antes da migração para GridFS.',
+    solution: 'Por favor, delete este ebook e faça o upload novamente pelo painel admin.'
+  });
+});
+
 // Rotas
 app.use('/api/auth', authRoutes);
 app.use('/api/ebooks', ebookRoutes);
