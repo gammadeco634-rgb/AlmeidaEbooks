@@ -196,13 +196,9 @@ router.delete('/:id', protect, admin, async (req, res) => {
       return res.status(404).json({ message: 'Ebook não encontrado' });
     }
 
-    // Deletar arquivos físicos
-    const pdfPath = path.join(process.cwd(), ebook.pdfFile);
-    const imagePath = path.join(process.cwd(), ebook.coverImage);
-
-    if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
-    if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-
+    // Com GridFS, os arquivos ficam no banco, não precisamos deletar separadamente
+    // O MongoDB vai gerenciar isso automaticamente
+    
     await ebook.deleteOne();
 
     res.json({ message: 'Ebook deletado com sucesso' });
