@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dns from 'node:dns/promises';
+import { initGridFS, getGridFSBucket } from './config/gridfs.js';
+import { GridFSBucket } from 'mongodb';
 
 // Configurações
 dotenv.config();
@@ -31,9 +33,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Servir arquivos estáticos (uploads)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
 // Conectar ao MongoDB
 const mongoOptions = {
   serverSelectionTimeoutMS: 5000,
@@ -44,15 +43,46 @@ const mongoOptions = {
 const mongoURI = 'mongodb+srv://andremartins746_db_user:270881270881@ebooksalmeida.ufzwqgc.mongodb.net/ebooks_fitness?retryWrites=true&w=majority';
 
 mongoose.connect(mongoURI, mongoOptions)
-  .then(() => console.log('✅ MongoDB conectado com sucesso!'))
+  .then(() => {
+    console.log('✅ MongoDB conectado com sucesso!');
+    initGridFS();
+  })
   .catch((err) => {
     console.error('❌ Erro ao conectar ao MongoDB:', err.message);
     console.log('\n⚠️  Tentando com mongodb+srv...');
     // Fallback para srv
     mongoose.connect('mongodb+srv://andremartins746_db_user:270881270881@ebooksalmeida.ufzwqgc.mongodb.net/ebooks_fitness?retryWrites=true&w=majority', mongoOptions)
-      .then(() => console.log('✅ Conectado via SRV!'))
+      .then(() => {
+        console.log('✅ Conectado via SRV!');
+        initGridFS();
+      })
       .catch((e) => console.error('❌ Falha total:', e.message));
   });
+
+// Rota para servir arquivos do GridFS
+app.get('/files/:filename', async (req, res) => {
+  try {
+    const gfs = getGridFSBucket();
+    const files = await gfs.find({ filename: req.params.filename }).toArray();
+    
+    if (!files || files.length === 0) {
+      return res.status(404).json({ message: 'Arquivo não encontrado' });
+    }
+    
+    const file = files[0];
+    
+    // Definir content type
+    res.set('Content-Type', file.contentType);
+    res.set('Content-Disposition', `inline; filename="${file.filename}"`);
+    
+    // Stream do arquivo
+    const downloadStream = gfs.openDownloadStreamByName(req.params.filename);
+    downloadStream.pipe(res);
+  } catch (error) {
+    console.error('Erro ao buscar arquivo:', error);
+    res.status(500).json({ message: 'Erro ao buscar arquivo' });
+  }
+});
 
 // Rotas
 app.use('/api/auth', authRoutes);

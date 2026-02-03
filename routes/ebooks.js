@@ -2,9 +2,28 @@ import express from 'express';
 import Ebook from '../models/Ebook.js';
 import User from '../models/User.js';
 import { protect, admin } from '../middleware/auth.js';
-import { upload, processUploads } from '../middleware/cloudinaryUpload.js';
+import { upload } from '../middleware/uploadSimple.js';
+import { getGridFSBucket } from '../config/gridfs.js';
+import { Readable } from 'stream';
 
 const router = express.Router();
+
+// Helper para fazer upload para GridFS
+const uploadToGridFS = (buffer, filename, contentType) => {
+  return new Promise((resolve, reject) => {
+    const gfs = getGridFSBucket();
+    const readableStream = Readable.from(buffer);
+    
+    const uploadStream = gfs.openUploadStream(filename, {
+      contentType: contentType
+    });
+    
+    uploadStream.on('error', reject);
+    uploadStream.on('finish', () => resolve(uploadStream.id));
+    
+    readableStream.pipe(uploadStream);
+  });
+};
 
 // @route   GET /api/ebooks
 // @desc    Listar todos os ebooks
@@ -71,22 +90,33 @@ router.get('/:id', async (req, res) => {
 router.post('/', protect, admin, upload.fields([
   { name: 'pdfFile', maxCount: 1 },
   { name: 'coverImage', maxCount: 1 }
-]), processUploads, async (req, res) => {
+]), async (req, res) => {
   try {
-    const { title, description, author, category, tags, pdfFile, coverImage } = req.body;
+    const { title, description, author, category, tags } = req.body;
 
-    if (!pdfFile || !coverImage) {
+    if (!req.files.pdfFile || !req.files.coverImage) {
       return res.status(400).json({ message: 'PDF e imagem de capa são obrigatórios' });
     }
 
+    const pdfFile = req.files.pdfFile[0];
+    const coverImage = req.files.coverImage[0];
+
+    // Upload para GridFS
+    const pdfFilename = `pdf-${Date.now()}-${pdfFile.originalname}`;
+    const imageFilename = `img-${Date.now()}-${coverImage.originalname}`;
+
+    await uploadToGridFS(pdfFile.buffer, pdfFilename, pdfFile.mimetype);
+    await uploadToGridFS(coverImage.buffer, imageFilename, coverImage.mimetype);
+
+    // Salvar no MongoDB com referências aos arquivos
     const ebook = await Ebook.create({
       title,
       description,
       author,
       category,
-      coverImage,
-      pdfFile,
-      fileSize: req.files.pdfFile[0].size,
+      coverImage: `/files/${imageFilename}`,
+      pdfFile: `/files/${pdfFilename}`,
+      fileSize: pdfFile.size,
       tags: tags ? JSON.parse(tags) : [],
       uploadedBy: req.user._id
     });
@@ -107,7 +137,7 @@ router.post('/', protect, admin, upload.fields([
 router.put('/:id', protect, admin, upload.fields([
   { name: 'pdfFile', maxCount: 1 },
   { name: 'coverImage', maxCount: 1 }
-]), processUploads, async (req, res) => {
+]), async (req, res) => {
   try {
     const ebook = await Ebook.findById(req.params.id);
     
@@ -115,7 +145,7 @@ router.put('/:id', protect, admin, upload.fields([
       return res.status(404).json({ message: 'Ebook não encontrado' });
     }
 
-    const { title, description, author, category, tags, featured, coverImage, pdfFile } = req.body;
+    const { title, description, author, category, tags, featured } = req.body;
 
     // Atualizar campos
     if (title) ebook.title = title;
@@ -125,15 +155,21 @@ router.put('/:id', protect, admin, upload.fields([
     if (tags) ebook.tags = JSON.parse(tags);
     if (featured !== undefined) ebook.featured = featured;
 
-    // Atualizar arquivos se fornecidos (já processados pelo Cloudinary)
-    if (coverImage) {
-      ebook.coverImage = coverImage;
-    }
+    // Atualizar arquivos se fornecidos
+    if (req.files) {
+      if (req.files.coverImage) {
+        const coverImage = req.files.coverImage[0];
+        const imageFilename = `img-${Date.now()}-${coverImage.originalname}`;
+        await uploadToGridFS(coverImage.buffer, imageFilename, coverImage.mimetype);
+        ebook.coverImage = `/files/${imageFilename}`;
+      }
 
-    if (pdfFile) {
-      ebook.pdfFile = pdfFile;
       if (req.files.pdfFile) {
-        ebook.fileSize = req.files.pdfFile[0].size;
+        const pdfFile = req.files.pdfFile[0];
+        const pdfFilename = `pdf-${Date.now()}-${pdfFile.originalname}`;
+        await uploadToGridFS(pdfFile.buffer, pdfFilename, pdfFile.mimetype);
+        ebook.pdfFile = `/files/${pdfFilename}`;
+        ebook.fileSize = pdfFile.size;
       }
     }
 
